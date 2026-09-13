@@ -25,15 +25,18 @@ export default {
 const CATEGORIES = [
   {
     name: "Tips de liderazgo",
-    guia: "Cuenta una anécdota concreta de liderar un equipo — un momento específico con alguien real de tu experiencia (puedes cambiar el nombre o no dar nombre), lo que pasó, y el consejo de liderazgo que se desprende de ahí. Nada de listas de consejos genéricos: una historia con principio y fin."
+    guia: "Cuenta una anécdota concreta de liderar un equipo — un momento específico con alguien real de tu experiencia (puedes cambiar el nombre o no dar nombre), lo que pasó, y el consejo de liderazgo que se desprende de ahí. Nada de listas de consejos genéricos: una historia con principio y fin.",
+    imagePrompt: "Editorial photo of a small diverse team gathered around a table in genuine discussion, warm natural light, cinematic, shallow depth of field, documentary style, no text, no logos, no watermark"
   },
   {
     name: "Reflexiones sobre emprender",
-    guia: "Cuenta una historia real y específica de tu camino emprendiendo — un momento difícil, una decisión, un quiebre o un antes/después concreto. Que se sienta una escena, no un resumen abstracto del camino del emprendedor."
+    guia: "Cuenta una historia real y específica de tu camino emprendiendo — un momento difícil, una decisión, un quiebre o un antes/después concreto. Que se sienta una escena, no un resumen abstracto del camino del emprendedor.",
+    imagePrompt: "Editorial photo of a lone figure silhouetted at sunrise on a rooftop or beach in a tropical coastal city, contemplative mood, cinematic golden light, shallow depth of field, no visible face, no text, no logos, no watermark"
   },
   {
     name: "Lecciones de liderazgo",
-    guia: "Cuenta una historia (tuya, o de alguien que conoces, o un caso conocido) que ilustre un principio de liderazgo al estilo de los grandes autores del tema (John Maxwell y similares) — la historia primero, la lección al final como conclusión natural. Nunca cites ni copies texto de ningún libro."
+    guia: "Cuenta una historia (tuya, o de alguien que conoces, o un caso conocido) que ilustre un principio de liderazgo al estilo de los grandes autores del tema (John Maxwell y similares) — la historia primero, la lección al final como conclusión natural. Nunca cites ni copies texto de ningún libro.",
+    imagePrompt: "Editorial photo symbolizing mentorship, two hands over an open notebook and a compass on a wooden desk, warm cinematic lighting, shallow depth of field, no visible faces, no text, no logos, no watermark"
   }
 ];
 
@@ -44,7 +47,33 @@ async function handleDailyDraft(env) {
   const category = CATEGORIES[today.getUTCDay() % CATEGORIES.length];
 
   const draft = await generateDraft(env, category);
-  await sendDraftEmail(env, draft, category.name);
+
+  let imageBase64 = null;
+  try {
+    imageBase64 = await generateImage(env, category.imagePrompt);
+  } catch (err) {
+    console.error("generateImage failed, se manda el correo sin foto:", err);
+  }
+
+  await sendDraftEmail(env, draft, category.name, imageBase64);
+}
+
+async function generateImage(env, prompt) {
+  const response = await env.AI.run("@cf/black-forest-labs/flux-1-schnell", {
+    prompt,
+    steps: 8
+  });
+
+  // flux-1-schnell responde { image: "<png en base64>" }.
+  if (response && typeof response.image === "string") {
+    return response.image;
+  }
+
+  // otros modelos de Workers AI regresan bytes binarios directo.
+  const bytes = new Uint8Array(response);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
 }
 
 async function generateDraft(env, category) {
@@ -96,8 +125,23 @@ function escapeHtml(str) {
 
 // Este agente no publica nada solo — solo redacta y manda por correo.
 // Tú copias y pegas el texto a tu perfil personal cuando quieras.
-async function sendDraftEmail(env, draft, categoryName) {
+async function sendDraftEmail(env, draft, categoryName, imageBase64) {
   const fullText = `${draft}\n\n${HASHTAGS}`;
+
+  const body = {
+    from: env.FROM_EMAIL,
+    to: env.APPROVER_EMAIL,
+    subject: `Post de hoy — ${categoryName}`,
+    html: `
+      <h2>Tema: ${escapeHtml(categoryName)}</h2>
+      <p style="white-space:pre-line;font-family:sans-serif;border:1px solid #ddd;border-radius:8px;padding:16px;background:#fafafa">${escapeHtml(fullText)}</p>
+      <p style="color:#888;font-size:12px">Copia el texto de arriba y pégalo directo en tu perfil de Facebook${imageBase64 ? ", junto con la foto adjunta" : ""}.</p>
+    `
+  };
+
+  if (imageBase64) {
+    body.attachments = [{ filename: "post.png", content: imageBase64 }];
+  }
 
   const response = await fetch("https://api.resend.com/emails", {
     method: "POST",
@@ -105,16 +149,7 @@ async function sendDraftEmail(env, draft, categoryName) {
       Authorization: `Bearer ${env.RESEND_API_KEY}`,
       "Content-Type": "application/json"
     },
-    body: JSON.stringify({
-      from: env.FROM_EMAIL,
-      to: env.APPROVER_EMAIL,
-      subject: `Post de hoy — ${categoryName}`,
-      html: `
-        <h2>Tema: ${escapeHtml(categoryName)}</h2>
-        <p style="white-space:pre-line;font-family:sans-serif;border:1px solid #ddd;border-radius:8px;padding:16px;background:#fafafa">${escapeHtml(fullText)}</p>
-        <p style="color:#888;font-size:12px">Copia el texto de arriba y pégalo directo en tu perfil de Facebook.</p>
-      `
-    })
+    body: JSON.stringify(body)
   });
 
   if (!response.ok) {
