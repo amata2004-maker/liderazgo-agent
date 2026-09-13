@@ -1,0 +1,10 @@
+name = "liderazgo-agent"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# 13:00 UTC = 8:00 AM Cancún (UTC-5, sin horario de verano)
+[triggers]
+crons = ["0 13 * * *"]
+
+[observability]
+enabled = true
