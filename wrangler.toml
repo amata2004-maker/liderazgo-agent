@@ -8,3 +8,7 @@ crons = ["0 13 * * *"]
 
 [observability]
 enabled = true
+
+# Genera la foto editorial de cada post — sin secreto aparte.
+[ai]
+binding = "AI"
